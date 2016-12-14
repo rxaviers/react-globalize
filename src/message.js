@@ -4,11 +4,10 @@ import generator from "./generator";
 import "globalize/message";
 import "globalize/plural";
 
-function messageSetup(componentProps, globalize, args) {
+function messageSetup(globalize, props, globalizePropValues) {
     var defaultMessage, path;
-    var children = componentProps.children;
-    var scope = componentProps.scope;
-    var pathProperty = componentProps.path;
+    var children = props.children;
+    var scope = props.scope;
 
     function getDefaultMessage(children) {
         if (typeof children === "string") {
@@ -18,11 +17,11 @@ function messageSetup(componentProps, globalize, args) {
         }
     }
 
-    function getMessage() {
+    function getMessage(globalize, path) {
         return globalize.cldr.get(["globalize-messages/{bundle}"].concat(path));
     }
 
-    function setMessage(message) {
+    function setMessage(globalize, path, message) {
         var data = {};
         function set(data, path, value) {
             var i;
@@ -42,47 +41,47 @@ function messageSetup(componentProps, globalize, args) {
     }
 
     // Set path - path as props supercedes default value.
-    if (pathProperty) {
-        // Override generator assumption. The generator assumes the args[0]
+    if (props.path) {
+        // Override generator assumption. The generator assumes the globalizePropValues[0]
         // (path) and props.children to be mutually exclusive, but this isn't
         // true here for messages. Because, it's possible to use props.path (for
         // path) and props.children for defaultMessage, which are two different
         // variables.
-        args[0] = pathProperty;
-        path = pathProperty.split("/");
+        globalizePropValues[0] = props.path;
+        path = props.path.split("/");
     } else {
-        // Although the generator had already set args[0] (path) as
+        // Although the generator had already set globalizePropValues[0] (path) as
         // props.children, here its type is checked and its value is sanitized.
         defaultMessage = getDefaultMessage(children);
-        args[0] = sanitizePath(defaultMessage);
-        path = [args[0]];
+        globalizePropValues[0] = sanitizePath(defaultMessage);
+        path = [globalizePropValues[0]];
     }
 
     // Scope path.
     if (scope) {
-        args[0] = scope + "/" + args[0];
+        globalizePropValues[0] = scope + "/" + globalizePropValues[0];
         path = scope.split("/").concat(path);
     }
 
     // Development mode only.
     if (globalize.cldr) {
-        if (!getMessage()) {
+        if (!getMessage(globalize, path)) {
             defaultMessage = defaultMessage || getDefaultMessage(children);
-            setMessage(defaultMessage);
+            setMessage(globalize, path, defaultMessage);
         }
     }
 
 }
 
-function replaceElements(componentProps, formatted) {
-    var elements = componentProps.elements;
+function replaceElements(props, formatted) {
+    var elements = props.elements;
 
     function _replaceElements(string, elements) {
         if (typeof string !== "string") {
-            throw new Error("missing or invalid string `" + string + "` (" + typeof string + ")");
+            throw new Error("Missing or invalid string `" + string + "` (" + typeof string + ")");
         }
         if (typeof elements !== "object") {
-            throw new Error("missing or invalid elements `" + elements + "` (" + typeof elements + ")");
+            throw new Error("Missing or invalid elements `" + elements + "` (" + typeof elements + ")");
         }
 
         // Given [x, y, z], it returns [x, element, y, element, z].
@@ -156,9 +155,8 @@ function sanitizePath(pathString) {
 }
 
 // Overload Globalize's `.formatMessage` to allow default message.
-var messageFormatterSuper = Globalize.messageFormatter;
-Globalize.messageFormatter =
-Globalize.prototype.messageFormatter = function(pathOrMessage) {
+var globalizeMessageFormatter = Globalize.messageFormatter;
+Globalize.messageFormatter = Globalize.prototype.messageFormatter = function(pathOrMessage) {
     var aux = {};
     var sanitizedPath = sanitizePath(pathOrMessage);
 
@@ -167,9 +165,9 @@ Globalize.prototype.messageFormatter = function(pathOrMessage) {
         // On runtime, the only way for deciding between using sanitizedPath or
         // pathOrMessage as path is by checking which formatter exists.
         arguments[0] = sanitizedPath;
-        aux = messageFormatterSuper.apply(this, arguments);
+        aux = globalizeMessageFormatter.apply(this, arguments);
         arguments[0] = pathOrMessage;
-        return aux || messageFormatterSuper.apply(this, arguments);
+        return aux || globalizeMessageFormatter.apply(this, arguments);
     }
 
     var sanitizedPathExists = this.cldr.get(["globalize-messages/{bundle}", sanitizedPath]) !== undefined;
@@ -186,12 +184,14 @@ Globalize.prototype.messageFormatter = function(pathOrMessage) {
     }
 
     arguments[0] = sanitizedPathExists ? sanitizedPath : pathOrMessage;
-    return messageFormatterSuper.apply(this, arguments);
+    return globalizeMessageFormatter.apply(this, arguments);
 };
 
 export default generator("formatMessage", ["path", "variables"], {
     beforeFormat: function() {
-        messageSetup(this.props, this.globalize, this.globalizePropValues);
+        if (process.env.NODE_ENV !== "production") {
+            messageSetup(this.globalize, this.props, this.globalizePropValues);
+        }
     },
     afterFormat: function(formattedValue) {
         return replaceElements(this.props, formattedValue);
